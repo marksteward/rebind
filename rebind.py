@@ -89,7 +89,10 @@ def dns_response(data):
 
     else:
         data = rchop(qn, '.' + D)
-        if '.' in data:
+        if '.' not in data:
+            # Main page - not rebound
+            reply.add_answer(RR(rname=qname, rtype=QTYPE.A, rclass=1, ttl=TTL, rdata=A(IP)))
+        else:
             target, client = data.rsplit('.', 1)
             if '-' in client:
                 op, client = client.split('-', 1)
