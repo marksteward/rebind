@@ -16,12 +16,13 @@ D = DomainName('example.com')
 IP = '127.0.0.1'
 TTL = 60 * 1
 PORT = 5053
+SERIALSUFFIX = '1'
 
 soa_record = SOA(
     mname=D.ns1,  # primary name server
     rname=D.hostmaster,  # email of the domain administrator
     times=(
-        int(datetime.utcnow().strftime('%Y%m%d1')), # serial number
+        int(datetime.utcnow().strftime('%Y%m%d') + SERIALSUFFIX), # serial number
         60 * 60 * 1,  # refresh
         60 * 60 * 3,  # retry
         60 * 60 * 24,  # expire
@@ -38,6 +39,11 @@ records = {
 }
 
 
+def rchop(string, ending):
+    if string.endswith(ending):
+        return string[:-len(ending)]
+    return string
+
 def dns_response(data):
     request = DNSRecord.parse(data)
 
@@ -46,26 +52,23 @@ def dns_response(data):
     reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
 
     qname = request.q.qname
-    qn = str(qname)
-    if qn.endswith('.'):
-        qn = qn[:-1]
+    qn = rchop(str(qname), '.')
 
     qtype = request.q.qtype
     qt = QTYPE[qtype]
 
-    if qn == D or qn.endswith('.' + D):
+    if qn in records:
+        for rdata in records[qn]:
+            rqt = rdata.__class__.__name__
+            if qt in ['ANY', rqt]:
+                reply.add_answer(RR(rname=qname, rtype=getattr(QTYPE, rqt), rclass=1, ttl=TTL, rdata=rdata))
 
-        for name, rrs in records.iteritems():
-            if name == qn:
-                for rdata in rrs:
-                    rqt = rdata.__class__.__name__
-                    if qt in ['*', rqt]:
-                        reply.add_answer(RR(rname=qname, rtype=QTYPE[rqt], rclass=1, ttl=TTL, rdata=rdata))
+        if qt in ['ANY']:
+            for rdata in ns_records:
+                reply.add_ar(RR(rname=D, rtype=QTYPE.NS, rclass=1, ttl=TTL, rdata=rdata))
 
-        for rdata in ns_records:
-            reply.add_ar(RR(rname=D, rtype=QTYPE.NS, rclass=1, ttl=TTL, rdata=rdata))
+            reply.add_auth(RR(rname=D, rtype=QTYPE.SOA, rclass=1, ttl=TTL, rdata=soa_record))
 
-        reply.add_auth(RR(rname=D, rtype=QTYPE.SOA, rclass=1, ttl=TTL, rdata=soa_record))
 
     print "---- Reply:\n", reply
 
