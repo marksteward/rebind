@@ -18,6 +18,7 @@ class DomainName(str):
 defaults = {
     'root': 'localhost',
     'ttl': '60',
+    'ip': '',
     'port': '5053',
     'serialsuffix': '1',
     'resolver': '8.8.8.8',
@@ -26,7 +27,10 @@ config = ConfigParser.ConfigParser(defaults)
 config.read(['rebind.conf'])
 
 D = DomainName(config.get('rebind', 'root'))
-IP = socket.gethostbyname(D)
+if config.get('rebind', 'ip') == '':
+    IP = socket.gethostbyname(D)
+else:
+    IP = config.get('rebind', 'ip')
 TTL = config.getint('rebind', 'ttl')
 PORT = config.getint('rebind', 'port')
 SERIALSUFFIX = config.get('rebind', 'serialsuffix')
