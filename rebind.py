@@ -1,5 +1,4 @@
-# coding=utf-8
-import datetime
+from datetime import datetime
 import sys
 import time
 import threading
@@ -15,14 +14,14 @@ class DomainName(str):
 
 D = DomainName('example.com')
 IP = '127.0.0.1'
-TTL = 60 * 5
+TTL = 60 * 1
 PORT = 5053
 
 soa_record = SOA(
     mname=D.ns1,  # primary name server
-    rname=D.andrei,  # email of the domain administrator
+    rname=D.hostmaster,  # email of the domain administrator
     times=(
-        201307231,  # serial number
+        int(datetime.utcnow().strftime('%Y%m%d1')), # serial number
         60 * 60 * 1,  # refresh
         60 * 60 * 3,  # retry
         60 * 60 * 24,  # expire
@@ -35,7 +34,7 @@ records = {
     D.ns1: [A(IP)],  # MX and NS records must never point to a CNAME alias (RFC 2181 section 10.3)
     D.ns2: [A(IP)],
     D.mail: [A(IP)],
-    D.andrei: [CNAME(D)],
+    D.hostmaster: [CNAME(D)],
 }
 
 
@@ -48,6 +47,9 @@ def dns_response(data):
 
     qname = request.q.qname
     qn = str(qname)
+    if qn.endswith('.'):
+        qn = qn[:-1]
+
     qtype = request.q.qtype
     qt = QTYPE[qtype]
 
@@ -61,9 +63,9 @@ def dns_response(data):
                         reply.add_answer(RR(rname=qname, rtype=QTYPE[rqt], rclass=1, ttl=TTL, rdata=rdata))
 
         for rdata in ns_records:
-            reply.add_ns(RR(rname=D, rtype=QTYPE.NS, rclass=1, ttl=TTL, rdata=rdata))
+            reply.add_ar(RR(rname=D, rtype=QTYPE.NS, rclass=1, ttl=TTL, rdata=rdata))
 
-        reply.add_ns(RR(rname=D, rtype=QTYPE.SOA, rclass=1, ttl=TTL, rdata=soa_record))
+        reply.add_auth(RR(rname=D, rtype=QTYPE.SOA, rclass=1, ttl=TTL, rdata=soa_record))
 
     print "---- Reply:\n", reply
 
@@ -79,12 +81,12 @@ class BaseRequestHandler(SocketServer.BaseRequestHandler):
         raise NotImplementedError
 
     def handle(self):
-        now = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')
+        now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')
         print "\n\n%s request %s (%s %s):" % (self.__class__.__name__[:3], now, self.client_address[0],
                                                self.client_address[1])
         try:
             data = self.get_data()
-            print len(data), data.encode('hex')  # repr(data).replace('\\x', '')[1:-1]
+            print len(data), data.encode('hex')
             self.send_data(dns_response(data))
         except Exception:
             traceback.print_exc(file=sys.stderr)
@@ -93,7 +95,7 @@ class BaseRequestHandler(SocketServer.BaseRequestHandler):
 class TCPRequestHandler(BaseRequestHandler):
 
     def get_data(self):
-        data = self.request.recv(8192).strip()
+        data = self.request.recv(8192)
         sz = int(data[:2].encode('hex'), 16)
         if sz < len(data) - 2:
             raise Exception("Wrong size of TCP packet")
@@ -102,14 +104,14 @@ class TCPRequestHandler(BaseRequestHandler):
         return data[2:]
 
     def send_data(self, data):
-        sz = hex(len(data))[2:].zfill(4).decode('hex')
+        sz = ('%04x' % len(data)).decode('hex')
         return self.request.sendall(sz + data)
 
 
 class UDPRequestHandler(BaseRequestHandler):
 
     def get_data(self):
-        return self.request[0].strip()
+        return self.request[0]
 
     def send_data(self, data):
         return self.request[1].sendto(data, self.client_address)
@@ -139,3 +141,4 @@ if __name__ == '__main__':
     finally:
         for s in servers:
             s.shutdown()
+
