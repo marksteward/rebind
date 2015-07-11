@@ -1,10 +1,13 @@
 from datetime import datetime
 import sys
+import ConfigParser
 import time
 import threading
 import traceback
 import SocketServer
 from dnslib import *
+import socket
+import dns.resolver
 
 
 class DomainName(str):
@@ -12,11 +15,22 @@ class DomainName(str):
         return DomainName(item + '.' + self)
 
 
-D = DomainName('example.com')
-IP = '127.0.0.1'
-TTL = 60 * 1
-PORT = 5053
-SERIALSUFFIX = '1'
+defaults = {
+    'root': 'localhost',
+    'ttl': '60',
+    'port': '5053',
+    'serialsuffix': '1',
+    'resolver': '8.8.8.8',
+}
+config = ConfigParser.ConfigParser(defaults)
+config.read(['rebind.conf'])
+
+D = DomainName(config.get('rebind', 'root'))
+IP = socket.gethostbyname(D)
+TTL = config.getint('rebind', 'ttl')
+PORT = config.getint('rebind', 'port')
+SERIALSUFFIX = config.get('rebind', 'serialsuffix')
+RESOLVER = config.get('rebind', 'resolver')
 
 soa_record = SOA(
     mname=D.ns1,  # primary name server
@@ -38,6 +52,7 @@ records = {
     D.hostmaster: [CNAME(D)],
 }
 
+clients = {}
 
 def rchop(string, ending):
     if string.endswith(ending):
@@ -69,6 +84,32 @@ def dns_response(data):
 
             reply.add_auth(RR(rname=D, rtype=QTYPE.SOA, rclass=1, ttl=TTL, rdata=soa_record))
 
+    elif not qn.endswith('.' + D):
+        pass
+
+    else:
+        data = rchop(qn, '.' + D)
+        if '.' in data:
+            target, client = data.rsplit('.', 1)
+            if '-' in client:
+                op, client = client.split('-', 1)
+
+                if op in ['N', 'R']:
+                    clients[client] = op
+
+            if client not in clients:
+                clients[client] = 'N'  # normal
+
+            print 'Client %s is currently %s' % (client, clients[client])
+            if clients[client] == 'N':
+                reply.add_answer(RR(rname=qname, rtype=QTYPE.A, rclass=1, ttl=15, rdata=A(IP)))
+            else:
+                try:
+                    print 'Looking up %s' % target
+                    for rdata in dns.resolver.query(target, 'A'):
+                        reply.add_answer(RR(rname=qname, rtype=QTYPE.A, rclass=1, ttl=15, rdata=A(rdata.address)))
+                except Exception:
+                    pass
 
     print "---- Reply:\n", reply
 

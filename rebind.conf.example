@@ -1,0 +1,3 @@
+[rebind]
+root = example.com
+port = 53
