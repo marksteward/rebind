@@ -100,6 +100,7 @@ def dns_response(data):
             target, client = data.rsplit('.', 1)
             if '-' in client:
                 op, client = client.split('-', 1)
+                op = op.upper()
 
                 if op in ['N', 'R']:
                     clients[client] = op
